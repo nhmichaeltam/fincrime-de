@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: fact_transactions
+    description: "Enriched transaction fact table with user and card attributes joined"
+    columns:
+      - name: user_id
+        tests:
+          - not_null
+      - name: transaction_date
+        tests:
+          - not_null
+      - name: amount
+        tests:
+          - not_null
+      - name: is_fraud
+        tests:
+          - not_null
+
+  - name: daily_fraud_rate
+    description: "Daily fraud rate and volume metrics — one row per calendar day"
+    columns:
+      - name: transaction_day
+        tests:
+          - not_null
+          - unique
+
+  - name: customer_risk_score
+    description: "Per-customer risk score combining fraud history, error rate, and FICO band"
+    columns:
+      - name: user_id
+        tests:
+          - not_null
+          - unique
+      - name: risk_score
+        tests:
+          - not_null
