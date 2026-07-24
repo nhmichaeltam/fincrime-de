@@ -2,7 +2,7 @@
 .env
 *.json
 # exceptions added to allow for dbt docs on github pages
-!docs/catalog.json.   
+!docs/catalog.json
 !docs/manifest.json
 gcp-key.json
 service-account*.json
