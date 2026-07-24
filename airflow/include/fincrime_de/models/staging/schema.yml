@@ -1,0 +1,43 @@
+version: 2
+
+models:
+  - name: stg_transactions
+    description: "Cleaned credit card transactions — amounts cast to numeric, fraud flag cast to boolean"
+    columns:
+      - name: user_id
+        description: "Foreign key to stg_users"
+        tests:
+          - not_null
+      - name: card_index
+        description: "Foreign key to stg_cards (scoped per user)"
+        tests:
+          - not_null
+      - name: transaction_date
+        tests:
+          - not_null
+      - name: amount
+        tests:
+          - not_null
+      - name: is_fraud
+        tests:
+          - not_null
+
+  - name: stg_users
+    description: "Cleaned customer reference data — income/debt cast to numeric, zipcode zero-padded"
+    columns:
+      - name: user_id
+        description: "Surrogate key — row index from source file"
+        tests:
+          - not_null
+          - unique
+
+  - name: stg_cards
+    description: "Cleaned card reference data — credit limit cast to numeric, dark web flag cast to boolean"
+    columns:
+      - name: user_id
+        description: "Foreign key to stg_users"
+        tests:
+          - not_null
+      - name: card_index
+        tests:
+          - not_null

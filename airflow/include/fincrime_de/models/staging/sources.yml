@@ -1,0 +1,13 @@
+version: 2
+
+sources:
+  - name: raw
+    database: fincrime-de
+    schema: raw
+    tables:
+      - name: transactions
+        description: "Raw credit card transactions (1991-2020), partitioned by month"
+      - name: users
+        description: "Raw customer reference data (2,000 synthetic users)"
+      - name: cards
+        description: "Raw credit card reference data (6,100 synthetic cards)"
