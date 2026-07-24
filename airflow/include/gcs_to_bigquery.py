@@ -9,6 +9,7 @@ import tempfile
 
 import click
 import pandas as pd
+from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
 from google.cloud import bigquery, storage
 
@@ -19,6 +20,7 @@ BUCKET_NAME = os.getenv("GCS_RAW_BUCKET")
 RAW_DATASET = "raw"
 
 BOOTSTRAP_CUTOFF_YEAR = 2018
+INCREMENTAL_YEAR_OFFSET = 7  # maps live 2026/2027 Airflow dates back to 2019/2020 source data
 
 GCS_PATHS = {
     "users": "users/sd254_users.csv",
@@ -163,7 +165,8 @@ def incremental(execution_date, chunksize: int) -> None:
     produce duplicates — deduplication is handled downstream in the dbt
     staging model.
     """
-    year, month, day = execution_date.year, execution_date.month, execution_date.day
+    historical_date = execution_date - relativedelta(years=INCREMENTAL_YEAR_OFFSET)
+    year, month, day = historical_date.year, historical_date.month, historical_date.day
     table_id = f"{PROJECT_ID}.{RAW_DATASET}.transactions"
     with tempfile.TemporaryDirectory() as tmpdir:
         path = os.path.join(tmpdir, "transactions.csv")
@@ -183,7 +186,7 @@ def incremental(execution_date, chunksize: int) -> None:
             total_rows += len(chunk)
     click.echo(
         f"Incremental load complete. Loaded {total_rows:,} rows "
-        f"for {execution_date.date()} into {table_id}"
+        f"for {historical_date.date()} (Airflow date: {execution_date.date()}) into {table_id}"
     )
 
 

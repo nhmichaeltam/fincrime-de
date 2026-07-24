@@ -10,8 +10,8 @@ DBT_PROJECT_DIR = f'{INCLUDE_DIR}/fincrime_de'
 with DAG(
     dag_id='fincrime_daily_transactions',
     description='Daily incremental transaction load followed by dbt transformations',
-    start_date=datetime(2019, 1, 1),
-    end_date=datetime(2020, 12, 31),
+    start_date=datetime(2026, 7, 1),
+    end_date=datetime(2027, 12, 31),
     schedule='@daily',     
     max_active_runs=1,
     catchup=True,
