@@ -65,6 +65,8 @@ Approximately 20 million transaction rows covering 1991 to 2018 are loaded in a 
 ### Daily Incremental Ingestion (2019–2020)
 Transactions from 2019 onwards are processed by the `fincrime_daily_transactions` Airflow DAG running `@daily`. Each run uses Airflow's `{{ ds }}` execution-date templating to load only that day's transactions, appending them to the raw transactions table. A backfill across the 2019–2020 window demonstrates Airflow's native catchup capability — a standard production requirement when a pipeline is first deployed against existing data.
 
+**Why the DAG's `start_date` is 2026, not 2019 — the 7-year offset:** the goal is to simulate a real payments organisation, where a new day's transactions land and the pipeline processes just that one day, every day. Airflow's `catchup` schedules missed runs relative to today's actual date, not relative to the dates inside the data itself. If the DAG's `start_date` were set directly to 2019, turning it on would immediately fire hundreds of runs back to back to "catch up" — the opposite of the steady daily feed this is meant to simulate. Instead, the DAG's `start_date` is set to a near-present date (2026-07-01), and the ingestion script shifts each `{{ ds }}` execution date back by a fixed 7 years to find the matching row in the dataset (e.g. a run on 2026-07-01 loads the 2019-07-01 transactions). This way each run still only processes one day's worth of data, arriving one day at a time, just like a live daily payments feed would — the offset only shifts which calendar date the DAG treats as "today," not the transaction data itself.
+
 ### Why this approach, and why it is honest
 
 The IBM dataset is synthetic and static — it does not generate new records daily the way a live card network would. Rather than obscuring this or engineering an artificial workaround, the pipeline makes the simulation explicit and names the real engineering patterns it is demonstrating:
@@ -72,6 +74,7 @@ The IBM dataset is synthetic and static — it does not generate new records dai
 - The bootstrap/incremental separation is a real production pattern, not a portfolio convention
 - The `{{ ds }}` date templating is identical to what production pipelines use against genuinely live sources
 - Airflow's catchup functionality is the same mechanism used when real pipelines are deployed against pre-existing data
+- The 7-year offset only shifts which calendar date the DAG treats as "today" — the underlying transaction data, dates, and fraud labels are untouched
 
 In a production environment, this pipeline would be pointed at a real-time card processing feed — the patterns, decisions, and orchestration logic would be unchanged.
 
