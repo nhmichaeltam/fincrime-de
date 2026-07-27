@@ -63,7 +63,7 @@ Customer and card data is loaded once in full via the `fincrime_reference_load` 
 Approximately 20 million transaction rows covering 1991 to 2018 are loaded in a single bootstrap operation. This is a standard, named production pattern: when a new pipeline is launched against a pre-existing data source, the historical baseline is bulk-loaded in one run before the scheduler takes over for ongoing incremental processing. Replaying decades of history through a daily job one row at a time would be both impractical and architecturally incorrect.
 
 ### Daily Incremental Ingestion (2019–2020)
-Transactions from 2019 onwards are processed by the `fincrime_daily_transactions` Airflow DAG running `@daily`. Each run uses Airflow's `{{ ds }}` execution-date templating to load only that day's transactions, appending them to the raw transactions table. A backfill across the 2019–2020 window demonstrates Airflow's native catchup capability — a standard production requirement when a pipeline is first deployed against existing data.
+Transactions from 2019 onwards are processed by the `fincrime_daily_transactions` Airflow DAG running `@daily`. Each run uses Airflow's `{{ ds }}` execution-date templating to load only that day's transactions. The load is **idempotent** — any rows already present for that day are deleted before the day is re-loaded (delete-then-append), so a retry or a re-run never double-counts. A backfill across the 2019–2020 window demonstrates Airflow's native catchup capability — a standard production requirement when a pipeline is first deployed against existing data.
 
 **Why the DAG's `start_date` is 2026, not 2019 — the 7-year offset:** the goal is to simulate a real payments organisation, where a new day's transactions land and the pipeline processes just that one day, every day. Airflow's `catchup` schedules missed runs relative to today's actual date, not relative to the dates inside the data itself. If the DAG's `start_date` were set directly to 2019, turning it on would immediately fire hundreds of runs back to back to "catch up" — the opposite of the steady daily feed this is meant to simulate. Instead, the DAG's `start_date` is set to a near-present date (2026-07-01), and the ingestion script shifts each `{{ ds }}` execution date back by a fixed 7 years to find the matching row in the dataset (e.g. a run on 2026-07-01 loads the 2019-07-01 transactions). This way each run still only processes one day's worth of data, arriving one day at a time, just like a live daily payments feed would — the offset only shifts which calendar date the DAG treats as "today," not the transaction data itself.
 
@@ -112,6 +112,7 @@ stg_txns  ────┘                                ──► daily_fraud_r
 | Apache Airflow (Astronomer Astro CLI) | Pipeline orchestration and scheduling |
 | Looker Studio | Dashboard served directly from mart layer |
 | click + python-dotenv | CLI arg handling and environment variable management |
+| GitHub Actions + SQLFluff | Continuous integration — SQL linting and dbt project validation on every PR |
 
 ---
 
@@ -141,9 +142,21 @@ Data quality is enforced at every model layer via dbt generic tests defined in `
 
 - **not_null** on all key columns (user_id, transaction_date, amount, is_fraud)
 - **unique** on primary keys (user_id in stg_users, transaction_day in daily_fraud_rate, user_id in customer_risk_score)
-- **referential integrity** via foreign key relationship tests between staging models
+- **referential integrity** via `relationships` tests linking transactions and cards back to the customer table (stg_users)
+- **duplicate detection** via a defensive singular test that flags any transaction appearing more than once on its natural key (a warn-level tripwire — the incremental load is idempotent, so this should stay silent)
 
-18 tests pass on every dbt run. Tests execute as the final step of each Airflow DAG run — a failed test blocks the pipeline from silently serving bad data downstream.
+These 21 tests run on every dbt run and execute as the final step of each Airflow DAG run — a failed test blocks the pipeline from silently serving bad data downstream.
+
+---
+
+## Continuous Integration
+
+Every pull request into `main` runs a GitHub Actions workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) with two independent checks:
+
+- **SQL lint (SQLFluff)** — enforces consistent style and formatting across all dbt models, configured for the BigQuery dialect via [`.sqlfluff`](.sqlfluff).
+- **dbt project validation** — runs `dbt parse` to confirm the whole project compiles and every `ref()` / `source()` resolves, so a broken model or a bad reference fails the PR rather than the next scheduled run.
+
+Both checks are deliberately credential-free and have no side effects on BigQuery — nothing is built or written to the warehouse during CI, so a pull request can never touch live datasets. This pairs with branch protection on `main` (a PR is required to merge; the approving-review requirement is off, as this is a solo project).
 
 ---
 
@@ -165,5 +178,4 @@ Dependencies were added incrementally as each pipeline stage was built — the `
 - **Static source data:** the IBM dataset is synthetic and does not generate new records. In production, the pipeline would be pointed at a real-time card processing feed. The orchestration patterns (scheduling, backfill, incremental loading) are identical regardless of source.
 - **Dimension tables:** the current design uses a denormalised wide fact table rather than a Kimball-style star schema with separate `dim_customer` and `dim_card` tables. A full SCD Type 2 approach on customer risk attributes would be appropriate for a production AML system where historical profile snapshots are needed for investigation audit trails.
 - **Rule-based fraud flagging:** the current risk scoring uses deterministic rule-based logic. A natural extension would be an ML scoring layer (e.g. a gradient boosting model served via Vertex AI) replacing or augmenting the rules.
-- **Idempotency on incremental loads:** the current incremental ingestion script appends rows on each run. A deduplication step in the staging dbt model or a pre-delete pattern in the ingestion script would be added before this pipeline was production-ready.
-- **CI/CD:** a GitHub Actions workflow for linting and dbt tests on pull requests is the logical next addition to the project.
+- **Warehouse-backed CI:** a GitHub Actions workflow already lints SQL (SQLFluff) and validates that the dbt project compiles on every pull request (see below). Extending CI to run a full `dbt build` against an isolated BigQuery CI dataset — so tests run against real data on each PR — is the logical next step, and requires making the `generate_schema_name` macro environment-aware so CI cannot write to the dev/prod datasets.

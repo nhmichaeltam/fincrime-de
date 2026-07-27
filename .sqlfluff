@@ -1,0 +1,47 @@
+[sqlfluff]
+dialect = bigquery
+templater = jinja
+max_line_length = 140
+
+# RF04: raw source columns are named after reserved-ish words (user, time, zip) —
+#       legitimate column references from the source CSVs, not a naming choice to flag.
+# ST02: flags boolean 'Yes'/'No' casts (case when x = 'Yes' then true else false end)
+#       suggesting coalesce() instead — a stylistic opinion, not a correctness issue;
+#       the explicit case/when is at least as readable for this cast pattern.
+# ST06: flags the standard dbt CTE closing line (`select * from renamed`) as
+#       "wildcard before simple targets" — this is the universal dbt CTE pattern
+#       used throughout every model here, not something to reorder.
+# LT01: models deliberately pad spaces before 'as' to hand-align renamed/cast
+#       columns for readability. SQLFluff's 'align' layout mode recomputes its
+#       own ideal column rather than accepting existing alignment as correct, so
+#       it just replaces one set of complaints with another; excluding LT01
+#       avoids reformatting every model to match a different alignment algorithm.
+exclude_rules = RF04, ST02, ST06, LT01
+
+[sqlfluff:templater:jinja]
+# Stub out ref()/source()/config() so models render without a dbt connection.
+apply_dbt_builtins = true
+
+[sqlfluff:layout:type:comma]
+line_position = trailing
+
+# Table aliases are used bare (`from transactions t`), matching the dbt Labs
+# style guide convention of implicit table aliases + explicit column aliases.
+[sqlfluff:rules:aliasing.table]
+aliasing = implicit
+
+# Models are written in lowercase SQL — enforce that consistently.
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.identifiers]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.functions]
+extended_capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.literals]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.types]
+extended_capitalisation_policy = lower

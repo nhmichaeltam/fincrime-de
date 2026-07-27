@@ -8,6 +8,10 @@ models:
         description: "Foreign key to stg_users"
         tests:
           - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: user_id
       - name: card_index
         description: "Foreign key to stg_cards (scoped per user)"
         tests:
@@ -38,6 +42,10 @@ models:
         description: "Foreign key to stg_users"
         tests:
           - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: user_id
       - name: card_index
         tests:
           - not_null

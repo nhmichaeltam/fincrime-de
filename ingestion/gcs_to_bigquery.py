@@ -6,12 +6,14 @@
 
 import os
 import tempfile
+from datetime import datetime
 
 import click
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
 from google.cloud import bigquery, storage
+from google.cloud.exceptions import NotFound
 
 load_dotenv()
 
@@ -48,6 +50,31 @@ def _load_to_bq(
     if time_partitioning:
         job_config.time_partitioning = time_partitioning
     client.load_table_from_dataframe(df, table_id, job_config=job_config).result()
+
+
+def _delete_existing_day(table_id: str, day: datetime) -> None:
+    """Delete any rows already loaded for a given source day.
+
+    Makes the daily load idempotent: re-running or backfilling a date replaces
+    that day's rows instead of appending duplicates. Skips silently if the table
+    does not exist yet (i.e. before the bootstrap load has created it).
+
+    The filter is on transaction_date directly, typed to match the column, so
+    BigQuery prunes to the relevant partition rather than scanning the whole table.
+    """
+    client = bigquery.Client(project=PROJECT_ID)
+    try:
+        table = client.get_table(table_id)
+    except NotFound:
+        return
+    field_type = {f.name: f.field_type for f in table.schema}["transaction_date"]
+    value = day.date() if field_type == "DATE" else day
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("day", field_type, value)]
+    )
+    client.query(
+        f"delete from `{table_id}` where transaction_date = @day", job_config=job_config
+    ).result()
 
 
 def _build_transaction_date(chunk: pd.DataFrame) -> pd.DataFrame:
@@ -160,14 +187,20 @@ def bootstrap(chunksize: int) -> None:
 def incremental(execution_date, chunksize: int) -> None:
     """Load a single day's transactions — called daily by the Airflow DAG.
 
-    Filters the source file to rows matching the execution date and appends
-    them to raw.transactions. Note: running twice for the same date will
-    produce duplicates — deduplication is handled downstream in the dbt
-    staging model.
+    Filters the source file to rows matching the execution date and loads them
+    into raw.transactions. The load is idempotent: any existing rows for the day
+    are deleted first (delete-then-append), so a retried or re-run date replaces
+    its rows rather than producing duplicates.
     """
     historical_date = execution_date - relativedelta(years=INCREMENTAL_YEAR_OFFSET)
     year, month, day = historical_date.year, historical_date.month, historical_date.day
     table_id = f"{PROJECT_ID}.{RAW_DATASET}.transactions"
+
+    # Idempotency: clear any rows already loaded for this day before re-loading.
+    # If the append below fails after this delete, the day is simply reloaded on
+    # the next run — safe precisely because this makes re-runs idempotent.
+    _delete_existing_day(table_id, historical_date)
+
     with tempfile.TemporaryDirectory() as tmpdir:
         path = os.path.join(tmpdir, "transactions.csv")
         _download_from_gcs(GCS_PATHS["transactions"], path)
