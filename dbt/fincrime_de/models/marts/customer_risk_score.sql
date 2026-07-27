@@ -32,7 +32,7 @@ scored as (
                 when fico_score < 670 then 20
                 when fico_score < 740 then 10
                 else 0
-              end,
+            end,
             2
         ) as risk_score
     from transaction_stats

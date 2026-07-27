@@ -1,0 +1,68 @@
+name: CI
+
+# Runs on every pull request into main. Two independent checks:
+#   1. sql-lint      — SQLFluff style/consistency check on all dbt models
+#   2. dbt-validate  — parses the dbt project so broken refs/sources or
+#                      un-compilable models fail the PR before merge
+# Both are credential-free and have no side effects on BigQuery: nothing is
+# built or written to the warehouse, so a PR can never clobber live datasets.
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sql-lint:
+    name: SQL lint (SQLFluff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install SQLFluff
+        run: pip install "sqlfluff==3.3.1"
+
+      - name: Lint dbt models
+        run: sqlfluff lint dbt/fincrime_de/models
+
+  dbt-validate:
+    name: dbt project validation (parse)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dbt-bigquery
+        run: pip install "dbt-bigquery==1.11.3"
+
+      # A minimal profile so dbt can build its manifest. `dbt parse` does not
+      # open a warehouse connection, so no service-account key is required here.
+      - name: Write CI dbt profile
+        run: |
+          mkdir -p "$HOME/.dbt"
+          cat > "$HOME/.dbt/profiles.yml" <<'YAML'
+          fincrime_de:
+            target: ci
+            outputs:
+              ci:
+                type: bigquery
+                method: oauth
+                project: fincrime-de
+                dataset: dbt_ci
+                location: europe-west2
+                threads: 4
+          YAML
+
+      - name: Validate models compile (dbt parse)
+        working-directory: dbt/fincrime_de
+        run: dbt parse --profiles-dir "$HOME/.dbt"
